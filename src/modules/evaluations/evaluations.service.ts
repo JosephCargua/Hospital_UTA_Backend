@@ -16,6 +16,16 @@ export class EvaluationsService {
   async createEvaluation(data: any, userId: string) {
     const { title, description, questions, semestre, paralelo } = data;
 
+    // Desactivar evaluaciones anteriores activas para este semestre y paralelo
+    if (semestre && paralelo) {
+      await this.supabase
+        .from('evaluations')
+        .update({ is_active: false })
+        .eq('semestre', semestre)
+        .eq('paralelo', paralelo)
+        .eq('is_active', true);
+    }
+
     // Insertar la evaluación
     const { data: evalData, error: evalError } = await this.supabase
       .from('evaluations')
@@ -72,8 +82,9 @@ export class EvaluationsService {
 
     let query = this.supabase
       .from('evaluations')
-      .select('id, title, description, semestre, paralelo')
-      .eq('is_active', true);
+      .select('id, title, description, semestre, paralelo, created_at')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
 
     if (studentSemestre && studentParalelo) {
       query = query
@@ -88,15 +99,26 @@ export class EvaluationsService {
     const result: any[] = [];
 
     for (const ev of evaluations) {
+      // Si el estudiante ya respondió a esta evaluación, no se le debe mostrar
+      if (userId && userId !== 'unknown') {
+        const { data: existingSub } = await this.supabase
+          .from('evaluation_submissions')
+          .select('id')
+          .eq('evaluation_id', ev.id)
+          .eq('student_id', userId)
+          .limit(1);
+
+        if (existingSub && existingSub.length > 0) {
+          continue;
+        }
+      }
+
       const { data: questions, error: qError } = await this.supabase
         .from('evaluation_questions')
         .select('id, question_text, image_url, options, correct_option_index')
         .eq('evaluation_id', ev.id);
       
-      if (!qError) {
-        // En Unity `QuestionData` no tiene correct_option_index, pero en `ManagerEvaluacion` se 
-        // mapea con el index de options. Unity envía "a", "b", "c". 
-        // Asi que mandamos las preguntas completas.
+      if (!qError && questions && questions.length > 0) {
         result.push({ ...ev, questions });
       }
     }
@@ -264,6 +286,7 @@ export class EvaluationsService {
       if (ans.selected_option === 'a') selectedIndex = 0;
       else if (ans.selected_option === 'b') selectedIndex = 1;
       else if (ans.selected_option === 'c') selectedIndex = 2;
+      else if (ans.selected_option === 'd') selectedIndex = 3;
       else selectedIndex = ans.selected_index; // fallback por si es el frontend web
 
       if (qObj && qObj.correct_option_index === selectedIndex) {
