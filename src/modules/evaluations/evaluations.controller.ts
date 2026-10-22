@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Req, UseGuards, HttpException, HttpStatus, Param, Query } from '@nestjs/common';
+import { Controller, Post, Get, Delete, Body, Req, UseGuards, HttpException, HttpStatus, Param, Query } from '@nestjs/common';
 import { EvaluationsService } from './evaluations.service';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 
@@ -50,6 +50,18 @@ export class EvaluationsController {
       throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
+
+  // Frontend (Docente/Admin) elimina una evaluación y sus datos asociados
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id')
+  async deleteEvaluation(@Param('id') id: string) {
+    try {
+      return await this.evaluationsService.deleteEvaluation(id);
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   // Frontend (Docente/Admin) crea una evaluación
   @UseGuards(JwtAuthGuard)
   @Post('create')

@@ -213,6 +213,30 @@ export class EvaluationsService {
     return { message: 'Evaluación cerrada exitosamente' };
   }
 
+  // Eliminar una evaluación y todos sus datos relacionados
+  async deleteEvaluation(id: string) {
+    // 1. Eliminar respuestas/envíos de estudiantes si existen
+    await this.supabase
+      .from('evaluation_submissions')
+      .delete()
+      .eq('evaluation_id', id);
+
+    // 2. Eliminar preguntas asociadas
+    await this.supabase
+      .from('evaluation_questions')
+      .delete()
+      .eq('evaluation_id', id);
+
+    // 3. Eliminar la evaluación
+    const { error: evalError } = await this.supabase
+      .from('evaluations')
+      .delete()
+      .eq('id', id);
+
+    if (evalError) throw new Error(evalError.message);
+    return { message: 'Evaluación eliminada exitosamente' };
+  }
+
   // Detalle de evaluación para el docente
   async getEvaluationDetails(id: string) {
     const { data: evaluation, error: evalError } = await this.supabase
