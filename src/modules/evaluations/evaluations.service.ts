@@ -144,13 +144,13 @@ export class EvaluationsService {
         .from('usuarios')
         .select('id', { count: 'exact', head: true })
         .eq('rol_id', 3)
-        .eq('estado', 'activo'); // Fix: estado is text, not boolean
+        .eq('estado', 'activo');
 
       if (stuError) {
         console.error("Error fetching students count:", stuError);
       }
 
-      // Es más seguro consultar detalles_estudiantes y filtrar
+      // Consultar detalles_estudiantes y filtrar por paralelo y semestre
       const { data: details, error: detError } = await this.supabase
         .from('detalles_estudiantes')
         .select('usuario_id')
@@ -254,12 +254,38 @@ export class EvaluationsService {
 
     if (qError) throw new Error(qError.message);
 
-    const { data: submissions, error: subError } = await this.supabase
+    let submissions: any[] = [];
+    const { data: subData, error: subError } = await this.supabase
       .from('evaluation_submissions')
       .select('*, usuarios(nombres, apellidos)')
       .eq('evaluation_id', id);
 
-    const { data: details, error: detError } = await this.supabase
+    if (!subError && subData) {
+      submissions = subData;
+    } else {
+      if (subError) console.error('Aviso en join de submissions:', subError.message);
+      // Fallback robusto: consultar submissions y buscar nombres directamente si falla el embedding
+      const { data: rawSubs } = await this.supabase
+        .from('evaluation_submissions')
+        .select('*')
+        .eq('evaluation_id', id);
+
+      if (rawSubs && rawSubs.length > 0) {
+        const userIds = rawSubs.map((s) => s.student_id);
+        const { data: users } = await this.supabase
+          .from('usuarios')
+          .select('id, nombres, apellidos')
+          .in('id', userIds);
+
+        const userMap = new Map((users || []).map((u) => [u.id, u]));
+        submissions = rawSubs.map((s) => ({
+          ...s,
+          usuarios: userMap.get(s.student_id) || { nombres: 'Estudiante', apellidos: '' },
+        }));
+      }
+    }
+
+    const { data: details } = await this.supabase
       .from('detalles_estudiantes')
       .select('usuario_id')
       .eq('semestre', evaluation.semestre)
@@ -287,22 +313,16 @@ export class EvaluationsService {
     let correctCount = 0;
     const totalQuestions = questions.length;
 
-    // En Unity mandan: { question_index: 0, selected_option: "a" }
-    // Asumiremos que el frontend enviaba question_id, pero Unity envía question_index.
-    // Necesitamos mapear question_index a la pregunta. 
-    // Unity manda "a", "b", "c". Necesitamos convertir a 0, 1, 2.
-    
-    // Obtenemos las preguntas ordenadas por ID o asumimos el mismo orden que se enviaron
+    // Obtenemos las preguntas ordenadas por ID
     const { data: orderedQuestions } = await this.supabase
       .from('evaluation_questions')
       .select('id, correct_option_index')
       .eq('evaluation_id', evaluationId)
-      .order('id', { ascending: true }); // Peligroso si Unity no recibe en este orden.
+      .order('id', { ascending: true });
 
     const safeOrderedQuestions = orderedQuestions || [];
 
-    answers.forEach(ans => {
-      // Unity envia question_index (0, 1, 2...) y selected_option ("a", "b", "c")
+    answers.forEach((ans) => {
       const qIndex = ans.question_index;
       const qObj = safeOrderedQuestions[qIndex];
       
@@ -322,15 +342,20 @@ export class EvaluationsService {
 
     // Guardar en la base de datos
     if (userId && userId !== 'unknown') {
-      await this.supabase
+      const { data: subData, error: subError } = await this.supabase
         .from('evaluation_submissions')
         .insert([{
           evaluation_id: evaluationId,
           student_id: userId,
           score: score
-        }]);
-    }
+        }])
+        .select();
 
+      if (subError) {
+        console.error('Error al registrar submission en Supabase:', subError);
+        throw new Error(`Error al registrar entrega: ${subError.message}`);
+      }
+    }
 
     return {
       total_questions: totalQuestions,
