@@ -159,13 +159,16 @@ export class EvaluationsService {
       
       const totalInParallel = details ? details.length : 0;
 
-      // Contar submissions
-      const { count: totalSubmissions, error: subError } = await this.supabase
+      // Contar submissions y scores
+      const { data: subsData } = await this.supabase
         .from('evaluation_submissions')
-        .select('id', { count: 'exact', head: true })
+        .select('score')
         .eq('evaluation_id', ev.id);
 
-      const submissions = totalSubmissions || 0;
+      const submissions = subsData ? subsData.length : 0;
+      const scores = subsData ? subsData.map((s) => parseFloat(s.score)).filter((n) => !isNaN(n)) : [];
+      const avgScore = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : null;
+
       let finalizada = false;
       if (totalInParallel > 0 && submissions >= totalInParallel) {
         finalizada = true;
@@ -181,7 +184,9 @@ export class EvaluationsService {
         ...ev,
         estado: ev.is_active ? 'Activa' : 'Finalizada',
         total_students: totalInParallel,
-        submissions_count: submissions
+        submissions_count: submissions,
+        avg_score: avgScore,
+        scores: scores
       });
     }
 
